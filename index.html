@@ -220,10 +220,12 @@ buildflow:
       params: # BuildFlow的Job的局部参数, job1独有
         - name: job1Var
           value: value1
+      build_ref: job1/build.yml
     - job: job2
       params: # BuildFlow的Job的局部参数，job2独有
         - name: job2Var
           value: value2
+      build_ref: job2/build.yml
     
 ```
 ---
