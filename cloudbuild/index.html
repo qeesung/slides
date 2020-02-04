@@ -1,1 +1,320 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Title</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+name: cloudbuild
+# CloudBuild2.0
+      
+## BuildProject
+
+---
+
+# Build as CODE
+
+1. 配置及代码, 更加直观, 任何人都可以参与配置文件的更改
+2. 对配置进行版本控制, 可追溯
+3. 配置文件更容易分发, 共享，复制  
+4. ...
+
+```yaml
+# master branch build.yml
+version: 2.0
+env:
+  label: prod-env
+steps:
+  BUILD:
+    - build_execute: 
+        command: sh build.sh
+```
+
+```yaml
+# test branch build.yml
+version: 2.0
+env:
+  label: test-env
+steps:
+  BUILD:
+    - build_execute: 
+        command: sh build.sh -p test-options
+```
+---
+class: center, middle
+# Quick Demo
+
+---
+# Build Job
+
+- Build Params
+- Build Environment
+- Build Steps
+
+```yaml
+version: 2.0
+# Build Params
+params:
+  - name: param1
+    value: value1
+# Build Environment
+env:
+  label: CloudBuildVM
+
+# Build Steps
+steps:
+  PRE_BUILD:
+    - checkout
+  BUILD:
+    - build_execute:
+        command: sh build.sh
+  POST_BUILD:
+    - sh:
+        command: |
+          # upload to cmc
+          # upload to cloud artifact
+```
+
+---
+# Build Params
+
+构建时候用到的一些变量, 这些变量可以从环境变量中获取, 并支持多种类型
+
+参数来源：
+1. build.yml中直接书写
+2. 构建的时候动态传入(具有更高优先级)
+
+```yaml
+params:
+  - name: param1  # 参数名字
+    value: value1 # 参数值
+  - name: intParam
+    value: 123
+  - name: stringParam
+    value: hello world
+  - name: boolParam
+    value: true
+```
+
+---
+# Build Environment
+
+构建环境，用于指定构建时候用到的环境：
+1. 镜像
+2. 工具
+3. ...
+
+如何指定BuildEnv：
+1. label
+2. playbook(暂不推荐)
+
+```yaml
+# use label
+env:
+  label: some-label
+```
+
+```yaml
+# use playbook
+env:
+  resource:
+    image:
+      builder:
+        provider: "build-env"
+        playbook_ref: 5g_ran/playbook.xml
+```
+
+---
+# Build Steps
+
+构建过程中定义的步骤, 步骤包含几个阶段：
+1. `PRE_ENV`：环境准备, 如镜像制作，机器制作
+2. `CONFIG_ENV`: 环境配置, 如挂载磁盘，执行初始化脚本
+3. `PRE_BUILD`: 构建准备，如代码下载，二进制下载
+4. `BUILD`：构建阶段，单一入口脚本触发构建
+5. `POST_BUILD`：构建后操作，构建清理，构建artifact上传
+
+所有阶段都不是必须的，但是至少要有一个
+
+```yaml
+steps:
+  PRE_BUILD:
+    - checkout # 检出代码
+  BUILD:
+    - build_execute:
+        command: sh build.sh
+  POST_BUILD:
+    - upload_cloud_artifact:
+        path: artifact-*.bin
+```
+
+---
+# BuildFlow
+
+`Build Job`是不可分割的最小构建单元，在一些复杂场景下，`Build Job`可能不太适用:
+1. 多个构建任务需要相互配合(DAG)
+2. 加速构建过程，进行分布式构建
+3. ...
+
+`BuildFlow`将多个`Build Job`按照构建的依赖顺序进行编排，并按照编排顺序进行调度构建。
+
+```yaml
+version: 2.0
+params:
+  - name: param1
+    value: value1
+env:
+  label: testlabel
+buildflow:
+  jobs:
+    - job: job1
+      depends_on:
+        - job2
+      build_ref: job1/build.yml
+    - job: job2
+      build_ref: job2/build.yml
+```
+---
+class: center, middle
+# Quick BuildFlow Demo
+---
+# BuildFlow Params
+在`BuildFlow`中参数包括：
+
+1. BuildFlow全局参数: 全部的job都能取到
+2. BuildFlow的Job的局部参数: 只有定义的Job能够取到
+3. Job定义参数: 只有定义的Job可以取到
+4. 输入参数：所有的job都可以取到
+
+参数优先级为：输入参数 > Job定义参数 > BuildFlow的Job局部参数 > BuildFlow的全局参数
+---
+
+# BuildFlow的全局参数和局部参数
+
+全局参数会被所有的参数共享，局部参数只能被Job独享
+
+```yaml
+params: # BuildFlow的全局参数, job1, job2共享
+  - name: globalVar1
+    value: value1
+env:
+  label: some-label
+buildflow:
+  jobs:
+    - job: job1
+      params: # BuildFlow的Job的局部参数, job1独有
+        - name: job1Var
+          value: value1
+      build_ref: job1/build.yml
+    - job: job2
+      params: # BuildFlow的Job的局部参数，job2独有
+        - name: job2Var
+          value: value2
+      build_ref: job2/build.yml
+    
+```
+---
+
+# BuildFlow Environment
+
+BuildFlow本身的运行也需要独占一台机器作为调度机, 所以每一次BuildFlow的运行，那么至少需要job数量+1台机器在资源池中。
+即:
+```scala
+count(machine pool) >= count(buildflow jobs) + 1
+```
+
+BuildFlow Environment的和Build Job的环境定义没有区别，对环境性能配置也没有特殊要求
+
+```yaml
+env:
+  label: buildflow-label
+```
+---
+
+# BuildFlow jobs
+BuildFlow的Jobs用于将一组Build Jobs进行编排，换句话说，即指定Build Jobs之间的依赖关系, 最终所有的Build Jobs会组成一个DAG关系图。
+
+通过`depends_on`来指定依赖的job的名字, 通过`build_ref`来指定子构建的构建脚本入口文件
+
+```yaml
+buildflow:
+  jobs:
+  - job: job1
+    depends_on:
+      - job2
+      - job3
+    build_ref: job1/build.yml
+  - job: job2
+    build_ref: job2/build.yml
+  - job: job3
+    build_ref: job3/bulid.yml
+```
+
+```
+                                +------+
+                                | job3 |
+                                +------+-------->-----+
+                                                | job1|
+                                +------+-------->-----+
+                                | job2 |
+                                +------+
+```
+---
+# BuildFlow Shared Workspace
+
+BuildFlow中的多个Jobs之间在构建以后可能会存在一些交互共享的操作：
+
+1. 构建的Artifact的共享
+2. 构建信息的互通
+
+可以通过指定`attach_workspace`来为所有的BuildFlow Jobs挂载一个共享目录
+```yaml
+buildflow:
+  attach_workspace:
+    path: output
+  jobs:
+  - job: job1
+    depends_on:
+      - job2
+    build_ref: job1/build.yml
+  - job: job2
+    build_ref: job2/build.yml
+```
+```
+                               +-------+        +-------+
+                               |  job1 +--------> job2  |
+                               +--+----+        +---+---+
+                         +--------v-----------------v------+
+                         |        Shared Workspace         |
+                         |       .../output/job1/job1.bin  |
+                         |       .../output/job2/job2.bin  |
+                         +---------------------------------+
+```
+---
+class: center, middle
+# Thank You
+wiki: http://wiki.inhuawei.com/display/CloudBuild2/2.9+Build2.0+Reference
+    </textarea>
+    <script src="https://remarkjs.com/downloads/remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
 
